@@ -59,6 +59,7 @@ func getUserPosts(c echo.Context) error {
 
 	// TODO run the two calls concurrently
 	var userErr, info = getUser(c)
+	//TODO check actual response code and don't return a 500 every time
 	if userErr != nil {
 		return c.JSON(http.StatusInternalServerError, userErr)
 	}
