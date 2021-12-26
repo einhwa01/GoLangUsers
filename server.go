@@ -1,15 +1,13 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
+	"github.com/labstack/echo/v4"
+	"golang.org/x/sync/errgroup"
 	"io/ioutil"
 	"net/http"
 	"strconv"
-
-	"github.com/labstack/echo/v4"
-	"golang.org/x/sync/errgroup"
 )
 
 type (
@@ -59,48 +57,41 @@ func main() {
 func getUserPosts(c echo.Context) error {
 	id, _ := strconv.Atoi(c.Param("id"))
 
-	ctx := context.Context(c)
+	g  := new(errgroup.Group)
 
-	g, ctx := errgroup.WithContext(ctx)
-
-	asyncInfo := make(chan userInfo)
-	asyncUserPosts := make(chan []post)
+	var asyncInfo userInfo
+	var asyncUserPosts []post
 
 	g.Go(func() error {
-		defer close(asyncInfo)
 		if userErr, info := getUser(c); userErr != nil {
-			return c.JSON(http.StatusInternalServerError, userErr)
+			return userErr
 		} else {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case asyncInfo <- info:
-			}
+			asyncInfo = info
 		}
 		return nil
 	})
 
 	g.Go(func() error {
-		defer close(asyncUserPosts)
 		if postError, userPosts := getPostsByUserId(c); postError != nil {
-			return c.JSON(http.StatusInternalServerError, postError)
+			return postError
 		} else {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case asyncUserPosts <- userPosts:
-			}
+			asyncUserPosts = userPosts
 		}
 		return nil
 	})
 
-	var userResp = user {
-		ID:       id,
-		UserInfo: asyncInfo,
-		Posts:    asyncUserPosts,
+	var userResp user
+	if err := g.Wait(); err == nil {
+		userResp = user {
+			ID:       id,
+			UserInfo: asyncInfo,
+			Posts:    asyncUserPosts,
+		}
+		return c.JSON(http.StatusOK, userResp)
+	} else {
+		//TODO proper error handling on the response type
+		return c.JSON(http.StatusInternalServerError, err)
 	}
-
-	return c.JSON(http.StatusOK, userResp)
 }
 
 func getUser(c echo.Context) (error, userInfo) {
