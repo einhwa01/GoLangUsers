@@ -3,11 +3,11 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"github.com/labstack/echo/v4"
+	"golang.org/x/sync/errgroup"
 	"io/ioutil"
 	"net/http"
 	"strconv"
-
-	"github.com/labstack/echo/v4"
 )
 
 type (
@@ -57,25 +57,41 @@ func main() {
 func getUserPosts(c echo.Context) error {
 	id, _ := strconv.Atoi(c.Param("id"))
 
-	// TODO run the two calls concurrently
-	var userErr, info = getUser(c)
-	//TODO check actual response code and don't return a 500 every time
-	if userErr != nil {
-		return c.JSON(http.StatusInternalServerError, userErr)
-	}
+	g  := new(errgroup.Group)
 
-	var postError, userPosts = getPostsByUserId(c)
-	if postError != nil {
-		return c.JSON(http.StatusInternalServerError, userErr)
-	}
+	var asyncInfo userInfo
+	var asyncUserPosts []post
 
-	var userResp = user {
-		ID:       id,
-		UserInfo: info,
-		Posts:    userPosts,
-	}
+	g.Go(func() error {
+		if userErr, info := getUser(c); userErr != nil {
+			return userErr
+		} else {
+			asyncInfo = info
+		}
+		return nil
+	})
 
-	return c.JSON(http.StatusOK, userResp)
+	g.Go(func() error {
+		if postError, userPosts := getPostsByUserId(c); postError != nil {
+			return postError
+		} else {
+			asyncUserPosts = userPosts
+		}
+		return nil
+	})
+
+	var userResp user
+	if err := g.Wait(); err == nil {
+		userResp = user {
+			ID:       id,
+			UserInfo: asyncInfo,
+			Posts:    asyncUserPosts,
+		}
+		return c.JSON(http.StatusOK, userResp)
+	} else {
+		//TODO proper error handling on the response type
+		return c.JSON(http.StatusInternalServerError, err)
+	}
 }
 
 func getUser(c echo.Context) (error, userInfo) {
